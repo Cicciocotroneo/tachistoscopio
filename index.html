@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="it">
 <head>
@@ -68,6 +69,7 @@
           const [displayTime, setDisplayTime] = React.useState(500); // in millisecondi
           const [isRunning, setIsRunning] = React.useState(false);
           const [currentWord, setCurrentWord] = React.useState('');
+          const [placeholder, setPlaceholder] = React.useState('');
           const [userInput, setUserInput] = React.useState('');
           const [score, setScore] = React.useState(0);
           const [totalAttempts, setTotalAttempts] = React.useState(0);
@@ -77,9 +79,13 @@
           const [sessionWords, setSessionWords] = React.useState([]);
           const [currentWordIndex, setCurrentWordIndex] = React.useState(0);
           const [showAddWordModal, setShowAddWordModal] = React.useState(false);
+          const [showProgressModal, setShowProgressModal] = React.useState(false);
           const [newWord, setNewWord] = React.useState('');
           const [newWordSyllables, setNewWordSyllables] = React.useState(1);
           const [isFullscreen, setIsFullscreen] = React.useState(false);
+          const [sessionReady, setSessionReady] = React.useState(false);
+          const [progressHistory, setProgressHistory] = React.useState([]);
+          const [readyToShow, setReadyToShow] = React.useState(false);
 
           // Parole italiane organizzate per numero di sillabe
           const [wordsBySyllables, setWordsBySyllables] = React.useState({
@@ -93,9 +99,9 @@
 
           // Configurazione delle difficoltà
           const difficultySettings = {
-            facile: { minSyllables: 1, maxSyllables: 2, minTime: 500, maxTime: 1000 },
-            medio: { minSyllables: 2, maxSyllables: 4, minTime: 300, maxTime: 700 },
-            difficile: { minSyllables: 3, maxSyllables: 6, minTime: 100, maxTime: 500 }
+            facile: { minSyllables: 1, maxSyllables: 2, minTime: 500, maxTime: 5000 },
+            medio: { minSyllables: 2, maxSyllables: 4, minTime: 300, maxTime: 5000 },
+            difficile: { minSyllables: 3, maxSyllables: 6, minTime: 100, maxTime: 5000 }
           };
 
           // Verifica se il browser supporta la modalità fullscreen
@@ -143,6 +149,19 @@
                 console.error("Errore nel caricamento delle parole salvate:", e);
               }
             }
+            
+            // Carica la cronologia dei progressi
+            const savedProgress = localStorage.getItem('tachistoscopio_progress');
+            if (savedProgress) {
+              try {
+                const parsed = JSON.parse(savedProgress);
+                if (Array.isArray(parsed)) {
+                  setProgressHistory(parsed);
+                }
+              } catch (e) {
+                console.error("Errore nel caricamento dei progressi salvati:", e);
+              }
+            }
           }, []);
 
           // Seleziona parole per la sessione
@@ -168,6 +187,7 @@
             
             setSessionWords(selectedWords);
             setCurrentWordIndex(0);
+            setSessionReady(true);
             return true;
           };
 
@@ -179,12 +199,12 @@
               setTotalAttempts(0);
               setHistory([]);
               setCurrentWordIndex(0);
-              showNextWord();
+              setReadyToShow(true);
             }
           };
 
-          // Mostra la prossima parola
-          const showNextWord = () => {
+          // Prepara per mostrare la prossima parola
+          const prepareNextWord = () => {
             if (currentWordIndex >= sessionWords.length) {
               endSession();
               return;
@@ -193,11 +213,26 @@
             setCurrentWord(sessionWords[currentWordIndex]);
             setUserInput('');
             setShowAnswer(false);
+            setReadyToShow(true);
+            setIsRunning(false);
+            setPlaceholder('');
+          };
+
+          // Crea una stringa di # della stessa lunghezza della parola
+          const createPlaceholder = (word) => {
+            return '#'.repeat(word.length);
+          };
+
+          // Mostra la parola corrente
+          const showCurrentWord = () => {
             setIsRunning(true);
+            setReadyToShow(false);
             
-            // Mostra la parola per il tempo impostato, poi la nasconde
+            // Mostra la parola per il tempo impostato, poi la sostituisce con #
             setTimeout(() => {
               setIsRunning(false);
+              const placeholderText = createPlaceholder(currentWord);
+              setPlaceholder(placeholderText);
             }, displayTime);
           };
 
@@ -214,21 +249,44 @@
             setTotalAttempts(totalAttempts + 1);
             if (correct) setScore(score + 1);
             
-            setCurrentWordIndex(currentWordIndex + 1);
-            
             // Mostra la risposta corretta
             setShowAnswer(true);
             
             // Passa alla prossima parola dopo un breve ritardo
             setTimeout(() => {
-              showNextWord();
+              setCurrentWordIndex(currentWordIndex + 1);
+              prepareNextWord();
             }, 1500);
           };
 
           // Termina la sessione
           const endSession = () => {
+            const percentageScore = totalAttempts > 0 ? Math.round((score / totalAttempts) * 100) : 0;
+            
+            // Salva i progressi
+            const newSession = {
+              date: new Date().toISOString(),
+              difficulty,
+              syllables: syllableCount,
+              displayTime,
+              score,
+              totalAttempts,
+              percentage: percentageScore
+            };
+            
+            const updatedProgress = [...progressHistory, newSession];
+            setProgressHistory(updatedProgress);
+            
+            // Salva nel localStorage
+            try {
+              localStorage.setItem('tachistoscopio_progress', JSON.stringify(updatedProgress));
+            } catch (e) {
+              console.error("Errore nel salvataggio dei progressi:", e);
+            }
+            
             setSessionActive(false);
-            alert(`Sessione completata!\nPunteggio: ${score}/${totalAttempts}\nPercentuale: ${totalAttempts > 0 ? Math.round((score / totalAttempts) * 100) : 0}%`);
+            setSessionReady(false);
+            alert(`Sessione completata!\nPunteggio: ${score}/${totalAttempts}\nPercentuale: ${percentageScore}%`);
           };
 
           // Funzione per aggiungere una nuova parola
@@ -260,6 +318,15 @@
             setNewWord('');
             setShowAddWordModal(false);
             alert(`Parola "${newWord}" aggiunta con successo al gruppo di ${newWordSyllables} sillabe!`);
+          };
+
+          // Cancella i dati dei progressi
+          const clearProgressData = () => {
+            if (confirm("Sei sicuro di voler cancellare tutta la cronologia dei progressi?")) {
+              setProgressHistory([]);
+              localStorage.removeItem('tachistoscopio_progress');
+              alert('Dati dei progressi cancellati con successo!');
+            }
           };
 
           // Esporta le parole in formato JSON
@@ -330,27 +397,51 @@
             }
           };
 
+          // Formatta la data in modo leggibile
+          const formatDate = (isoString) => {
+            try {
+              const date = new Date(isoString);
+              return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+            } catch (e) {
+              return isoString;
+            }
+          };
+
           return (
             <div className="p-4 max-w-lg mx-auto bg-white rounded-lg shadow-lg h-full overflow-auto">
               <div className="flex justify-between items-center mb-4">
                 <h1 className="text-xl font-bold">Lettura Tachistoscopica</h1>
-                {supportsFullscreen && (
+                <div className="flex gap-2">
                   <button 
-                    className="bg-blue-500 text-white p-2 rounded-full"
-                    onClick={toggleFullscreen}
-                    aria-label={isFullscreen ? "Esci da schermo intero" : "Schermo intero"}
+                    className="bg-purple-500 text-white p-2 rounded-full"
+                    onClick={() => setShowProgressModal(true)}
+                    aria-label="Mostra progressi"
                   >
-                    {isFullscreen ? (
-                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"></path>
-                      </svg>
-                    ) : (
-                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path>
-                      </svg>
-                    )}
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path>
+                      <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
+                      <path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"></path>
+                      <path d="M3 5c0 1.66 4 3 9 3s9-1.34 9-3"></path>
+                    </svg>
                   </button>
-                )}
+                  {supportsFullscreen && (
+                    <button 
+                      className="bg-blue-500 text-white p-2 rounded-full"
+                      onClick={toggleFullscreen}
+                      aria-label={isFullscreen ? "Esci da schermo intero" : "Schermo intero"}
+                    >
+                      {isFullscreen ? (
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"></path>
+                        </svg>
+                      ) : (
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path>
+                        </svg>
+                      )}
+                    </button>
+                  )}
+                </div>
               </div>
               
               {!sessionActive ? (
@@ -467,12 +558,24 @@
                             {userInput}
                           </span>
                         </div>
+                      ) : readyToShow ? (
+                        <button 
+                          className="bg-blue-500 text-white py-3 px-6 rounded-full hover:bg-blue-600 transition text-lg"
+                          onClick={showCurrentWord}
+                        >
+                          Mostra Parola
+                        </button>
                       ) : (
-                        <div className="text-gray-500">La parola è stata mostrata</div>
+                        <div className="flex flex-col items-center justify-center">
+                          <div className="text-gray-500 mb-2">La parola è stata mostrata</div>
+                          {placeholder && (
+                            <div className="text-3xl font-bold text-gray-500">{placeholder}</div>
+                          )}
+                        </div>
                       )}
                     </div>
                     
-                    {!isRunning && !showAnswer && (
+                    {!isRunning && !showAnswer && !readyToShow && (
                       <div className="mb-4">
                         <label className="block text-gray-700 mb-2">Cosa hai visto?</label>
                         <div className="flex">
@@ -508,8 +611,7 @@
                         )}
                       </div>
                     </div>
-                    
-                    <button 
+                        <button 
                       className="w-full mt-4 bg-red-500 text-white py-2 px-4 rounded hover:bg-red-600 transition"
                       onClick={endSession}
                     >
@@ -565,6 +667,67 @@
                         onClick={addNewWord}
                       >
                         Aggiungi
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
+              {/* Modal per visualizzare i progressi */}
+              {showProgressModal && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+                  <div className="bg-white rounded-lg p-6 max-w-4xl w-full h-3/4 flex flex-col">
+                    <h3 className="text-xl font-bold mb-4">Cronologia Progressi</h3>
+                    
+                    <div className="overflow-y-auto flex-grow mb-4">
+                      {progressHistory.length > 0 ? (
+                        <div className="overflow-x-auto">
+                          <table className="min-w-full border-collapse border border-gray-300">
+                            <thead>
+                              <tr className="bg-gray-100">
+                                <th className="border border-gray-300 px-4 py-2">Data</th>
+                                <th className="border border-gray-300 px-4 py-2">Difficoltà</th>
+                                <th className="border border-gray-300 px-4 py-2">Sillabe</th>
+                                <th className="border border-gray-300 px-4 py-2">Tempo (ms)</th>
+                                <th className="border border-gray-300 px-4 py-2">Punteggio</th>
+                                <th className="border border-gray-300 px-4 py-2">Tentativi</th>
+                                <th className="border border-gray-300 px-4 py-2">Percentuale</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {progressHistory.map((session, index) => (
+                                <tr key={index} className={index % 2 === 0 ? "bg-white" : "bg-gray-50"}>
+                                  <td className="border border-gray-300 px-4 py-2">{formatDate(session.date)}</td>
+                                  <td className="border border-gray-300 px-4 py-2">{session.difficulty}</td>
+                                  <td className="border border-gray-300 px-4 py-2">{session.syllables}</td>
+                                  <td className="border border-gray-300 px-4 py-2">{session.displayTime}</td>
+                                  <td className="border border-gray-300 px-4 py-2">{session.score}</td>
+                                  <td className="border border-gray-300 px-4 py-2">{session.totalAttempts}</td>
+                                  <td className="border border-gray-300 px-4 py-2">{session.percentage}%</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : (
+                        <div className="text-center py-8 text-gray-500">
+                          Nessun dato di progresso disponibile. Completa una sessione per vedere i risultati qui.
+                        </div>
+                      )}
+                    </div>
+                    
+                    <div className="flex justify-between">
+                      <button 
+                        className="bg-red-500 text-white py-2 px-4 rounded hover:bg-red-600 transition"
+                        onClick={clearProgressData}
+                      >
+                        Cancella Dati
+                      </button>
+                      <button 
+                        className="bg-gray-300 text-gray-800 py-2 px-4 rounded hover:bg-gray-400 transition"
+                        onClick={() => setShowProgressModal(false)}
+                      >
+                        Chiudi
                       </button>
                     </div>
                   </div>
