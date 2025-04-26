@@ -333,22 +333,26 @@
 
           // Avvia una nuova sessione di esercizio
           const startSession = () => {
+            // Resetta completamente lo stato prima di iniziare una nuova sessione
+            setShowAnswer(false);
+            setIsRunning(false);
+            setUserInput('');
+            setScore(0);
+            setTotalAttempts(0);
+            setHistory([]);
+            setCurrentWordIndex(0);
+            setPlaceholder('');
+            
             // Seleziona e imposta le parole prima di rendere la sessione attiva
             const words = selectSessionWords();
             if (words && words.length > 0) {
               // Prima imposta la parola corrente e le parole della sessione
               setSessionWords(words);
               setCurrentWord(words[0]);
-              setUserInput(''); // Reset dell'input utente all'avvio della sessione
               
-              // Poi attiva la sessione e resetta i contatori
+              // Poi attiva la sessione e prepara per mostrare la prima parola
               setSessionActive(true);
-              setScore(0);
-              setTotalAttempts(0);
-              setHistory([]);
-              setCurrentWordIndex(0);
               setReadyToShow(true);
-              setPlaceholder('');
             }
           };
 
@@ -360,7 +364,7 @@
             }
             
             setCurrentWord(sessionWords[currentWordIndex]);
-            setUserInput(''); // Reset esplicito dell'input utente
+            setUserInput('');
             setShowAnswer(false);
             setReadyToShow(true);
             setIsRunning(false);
@@ -376,7 +380,7 @@
           const showCurrentWord = () => {
             setIsRunning(true);
             setReadyToShow(false);
-            setUserInput(''); // Reset dell'input utente quando viene mostrata una nuova parola
+            setUserInput('');
             
             // Mostra la parola per il tempo impostato, poi la sostituisce con #
             setTimeout(() => {
@@ -388,16 +392,24 @@
 
           // Verifica la risposta dell'utente
           const checkAnswer = () => {
+            // Incrementa il contatore dei tentativi prima di verificare la risposta
+            const newTotalAttempts = totalAttempts + 1;
+            setTotalAttempts(newTotalAttempts);
+            
+            // Verifica se la risposta è corretta
             const correct = userInput.toLowerCase().trim() === currentWord.toLowerCase();
+            
+            // Aggiorna il punteggio se la risposta è corretta
+            const newScore = correct ? score + 1 : score;
+            setScore(newScore);
+            
+            // Aggiorna la cronologia
             const newHistory = [...history, {
               word: currentWord,
               input: userInput,
               correct: correct
             }];
-            
             setHistory(newHistory);
-            setTotalAttempts(totalAttempts + 1);
-            if (correct) setScore(score + 1);
             
             // Mostra la risposta corretta
             setShowAnswer(true);
@@ -413,9 +425,39 @@
                 setReadyToShow(true);
                 setShowAnswer(false);
                 setPlaceholder('');
-                setUserInput(''); // Reset dell'input utente quando passiamo alla parola successiva
+                setUserInput('');
               } else {
-                endSession();
+                // Salva i progressi e termina la sessione
+                const percentageScore = newTotalAttempts > 0 
+                  ? Math.round((newScore / newTotalAttempts) * 100) 
+                  : 0;
+                
+                const newSession = {
+                  date: new Date().toISOString(),
+                  difficulty,
+                  syllables: syllableCount,
+                  displayTime,
+                  score: newScore,
+                  totalAttempts: newTotalAttempts,
+                  percentage: percentageScore
+                };
+                
+                const updatedProgress = [...progressHistory, newSession];
+                setProgressHistory(updatedProgress);
+                
+                // Salva nel localStorage
+                try {
+                  localStorage.setItem('tachistoscopio_progress', JSON.stringify(updatedProgress));
+                } catch (e) {
+                  console.error("Errore nel salvataggio dei progressi:", e);
+                }
+                
+                setSessionActive(false);
+                setReadyToShow(false);
+                setUserInput('');
+                
+                // Messaggio di fine sessione
+                alert(`Sessione completata!\nPunteggio: ${newScore}/${newTotalAttempts}\nPercentuale: ${percentageScore}%`);
               }
             }, 1500);
           };
@@ -445,9 +487,15 @@
               console.error("Errore nel salvataggio dei progressi:", e);
             }
             
+            // Resetta completamente lo stato
             setSessionActive(false);
-            setSessionReady(false);
-            setUserInput(''); // Reset dell'input utente alla fine della sessione
+            setShowAnswer(false);
+            setReadyToShow(false);
+            setIsRunning(false);
+            setUserInput('');
+            setCurrentWord('');
+            setPlaceholder('');
+            
             alert(`Sessione completata!\nPunteggio: ${score}/${totalAttempts}\nPercentuale: ${percentageScore}%`);
           };
 
@@ -472,7 +520,7 @@
               } catch (e) {
                 console.error("Errore nel salvataggio delle parole:", e);
               }
-             
+              
               return updatedWords;
             });
 
