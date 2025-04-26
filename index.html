@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="it">
 <head>
@@ -23,6 +24,9 @@
     
     <!-- Babel per JSX -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Chart.js per i grafici -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     
     <style>
         body, html {
@@ -85,6 +89,10 @@
           const [sessionReady, setSessionReady] = React.useState(false);
           const [progressHistory, setProgressHistory] = React.useState([]);
           const [readyToShow, setReadyToShow] = React.useState(false);
+          const [performanceChartInstance, setPerformanceChartInstance] = React.useState(null);
+
+          // Riferimento al canvas del grafico
+          const chartRef = React.useRef(null);
 
           // Parole italiane organizzate per numero di sillabe
           const [wordsBySyllables, setWordsBySyllables] = React.useState({
@@ -163,6 +171,137 @@
             }
           }, []);
 
+          // Aggiorna il grafico quando viene visualizzato il modal dei progressi
+          React.useEffect(() => {
+            if (showProgressModal && progressHistory.length > 0) {
+              updatePerformanceChart();
+            }
+          }, [showProgressModal]);
+          
+          // Calcola il punteggio di performance basato su sillabe, tempo e percentuale di successo
+          const calculatePerformanceScore = (session) => {
+            // Fattore sillabe: più sillabe = punteggio più alto
+            const syllableFactor = session.syllables * 10;
+            
+            // Fattore tempo: meno tempo = punteggio più alto (inverso)
+            // Normalizziamo rispetto a 5000ms (max possibile)
+            const timeFactor = (1 - (session.displayTime / 5000)) * 50;
+            
+            // Fattore accuratezza: percentuale corretta
+            const accuracyFactor = session.percentage;
+            
+            // Combiniamo i fattori per un punteggio totale
+            // La formula dà più peso all'accuratezza, poi alle sillabe e infine al tempo
+            return (syllableFactor + timeFactor) * (accuracyFactor / 100);
+          };
+
+          // Aggiorna il grafico delle performance
+          const updatePerformanceChart = () => {
+            if (!chartRef.current || progressHistory.length === 0) return;
+            
+            // Ordina la cronologia per data
+            const sortedHistory = [...progressHistory].sort((a, b) => new Date(a.date) - new Date(b.date));
+            
+            // Prepara i dati per il grafico
+            const labels = sortedHistory.map((session, index) => `Sess. ${index + 1}`);
+            const accuracyData = sortedHistory.map(session => session.percentage);
+            const performanceData = sortedHistory.map(session => calculatePerformanceScore(session));
+            
+            // Formatta le date
+            const dates = sortedHistory.map(session => {
+              const date = new Date(session.date);
+              return `${date.getDate()}/${date.getMonth() + 1}/${date.getFullYear()}`;
+            });
+            
+            // Crea o aggiorna il grafico
+            if (performanceChartInstance) {
+              performanceChartInstance.destroy();
+            }
+            
+            const ctx = chartRef.current.getContext('2d');
+            const newChart = new Chart(ctx, {
+              type: 'line',
+              data: {
+                labels: labels,
+                datasets: [
+                  {
+                    label: 'Percentuale Corretta (%)',
+                    data: accuracyData,
+                    borderColor: 'rgba(75, 192, 192, 1)',
+                    backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                    tension: 0.3,
+                    yAxisID: 'y'
+                  },
+                  {
+                    label: 'Punteggio Performance',
+                    data: performanceData,
+                    borderColor: 'rgba(153, 102, 255, 1)',
+                    backgroundColor: 'rgba(153, 102, 255, 0.2)',
+                    tension: 0.3,
+                    yAxisID: 'y1'
+                  }
+                ]
+              },
+              options: {
+                responsive: true,
+                interaction: {
+                  mode: 'index',
+                  intersect: false
+                },
+                stacked: false,
+                scales: {
+                  y: {
+                    type: 'linear',
+                    display: true,
+                    position: 'left',
+                    title: {
+                      display: true,
+                      text: 'Percentuale (%)',
+                      color: 'rgba(75, 192, 192, 1)'
+                    },
+                    min: 0,
+                    max: 100
+                  },
+                  y1: {
+                    type: 'linear',
+                    display: true,
+                    position: 'right',
+                    title: {
+                      display: true,
+                      text: 'Punteggio',
+                      color: 'rgba(153, 102, 255, 1)'
+                    },
+                    min: 0,
+                    grid: {
+                      drawOnChartArea: false
+                    }
+                  }
+                },
+                plugins: {
+                  tooltip: {
+                    callbacks: {
+                      afterTitle: function(context) {
+                        const index = context[0].dataIndex;
+                        return dates[index];
+                      },
+                      afterBody: function(context) {
+                        const index = context[0].dataIndex;
+                        const session = sortedHistory[index];
+                        return [
+                          `Sillabe: ${session.syllables}`,
+                          `Tempo: ${session.displayTime}ms`,
+                          `Punteggio: ${session.score}/${session.totalAttempts}`
+                        ];
+                      }
+                    }
+                  }
+                }
+              }
+            });
+            
+            setPerformanceChartInstance(newChart);
+          };
+
           // Seleziona parole per la sessione
           const selectSessionWords = () => {
             const availableWords = wordsBySyllables[syllableCount] || [];
@@ -185,8 +324,6 @@
             }
             
             setSessionWords(selectedWords);
-            setCurrentWordIndex(0);
-            setSessionReady(true);
             return true;
           };
 
@@ -198,10 +335,15 @@
               setTotalAttempts(0);
               setHistory([]);
               setCurrentWordIndex(0);
-              // Imposta subito la prima parola corrente
-              setCurrentWord(sessionWords[0] || '');
-              setReadyToShow(true);
-              setPlaceholder('');
+              
+              // FIX: Imposta la prima parola dopo che l'array sessionWords è stato popolato
+              setTimeout(() => {
+                if (sessionWords.length > 0) {
+                  setCurrentWord(sessionWords[0]);
+                  setReadyToShow(true);
+                  setPlaceholder('');
+                }
+              }, 100);
             }
           };
 
@@ -331,6 +473,13 @@
             if (confirm("Sei sicuro di voler cancellare tutta la cronologia dei progressi?")) {
               setProgressHistory([]);
               localStorage.removeItem('tachistoscopio_progress');
+              
+              // Distruggi il grafico se esiste
+              if (performanceChartInstance) {
+                performanceChartInstance.destroy();
+                setPerformanceChartInstance(null);
+              }
+              
               alert('Dati dei progressi cancellati con successo!');
             }
           };
@@ -680,9 +829,21 @@
               {/* Modal per visualizzare i progressi */}
               {showProgressModal && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-                  <div className="bg-white rounded-lg p-6 max-w-4xl w-full h-3/4 flex flex-col">
+                  <div className="bg-white rounded-lg p-6 max-w-4xl w-full h-4/5 flex flex-col">
                     <h3 className="text-xl font-bold mb-4">Cronologia Progressi</h3>
                     
+                    {/* Grafico delle performance */}
+                    <div className="mb-6 h-64 border rounded p-2">
+                      {progressHistory.length > 0 ? (
+                        <canvas ref={chartRef}></canvas>
+                      ) : (
+                        <div className="h-full flex items-center justify-center text-gray-500">
+                          Nessun dato di progresso disponibile per la visualizzazione del grafico.
+                        </div>
+                      )}
+                    </div>
+                    
+                    <h4 className="font-bold mb-2">Dettaglio Sessioni</h4>
                     <div className="overflow-y-auto flex-grow mb-4">
                       {progressHistory.length > 0 ? (
                         <div className="overflow-x-auto">
@@ -696,6 +857,7 @@
                                 <th className="border border-gray-300 px-4 py-2">Punteggio</th>
                                 <th className="border border-gray-300 px-4 py-2">Tentativi</th>
                                 <th className="border border-gray-300 px-4 py-2">Percentuale</th>
+                                <th className="border border-gray-300 px-4 py-2">Performance</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -708,6 +870,9 @@
                                   <td className="border border-gray-300 px-4 py-2">{session.score}</td>
                                   <td className="border border-gray-300 px-4 py-2">{session.totalAttempts}</td>
                                   <td className="border border-gray-300 px-4 py-2">{session.percentage}%</td>
+                                  <td className="border border-gray-300 px-4 py-2 text-right font-semibold">
+                                    {calculatePerformanceScore(session).toFixed(1)}
+                                  </td>
                                 </tr>
                               ))}
                             </tbody>
